@@ -33,7 +33,7 @@
 
 #define USER_MAIN "a1264598"
 
-void do_retransmit(const int sock);
+void do_retransmit(const int sock, QueueHandle_t queue_command_handler);
 
 void tcp_server_task(void *pvParameters);
 
