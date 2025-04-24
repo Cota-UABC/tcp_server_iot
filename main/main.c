@@ -13,10 +13,12 @@
 #include "udp_s.h"
 #include "tcp_server.h"
 
-static const char *TAG = "MAIN_TCP";
+static const char *TAG = "MAIN";
 
-#define SSID "Totalplay-2.4G-b518"
-#define PASS "Qxm2EAzh99Ce7Lfk"
+//#define SSID "Totalplay-2.4G-b518"
+//#define PASS "Qxm2EAzh99Ce7Lfk"
+#define SSID "COTA_PC"
+#define PASS "0402{V8z"
 //#define SSID "cota_mobil"
 //#define PASS "123456780"
 

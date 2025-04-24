@@ -1,24 +1,27 @@
 #include "tcp_server.h"
 
+static const char *TAG_T = "TCP";
+
 int sock;
 
 void keep_alive_timer_task(void *pvParameters)
 {
     SemaphoreHandle_t keep_alive_semaphore = (SemaphoreHandle_t)pvParameters;
 
-    ESP_LOGI(TAG, "Timer started");
+    ESP_LOGI(TAG_T, "Timer started");
     vTaskDelay(pdMS_TO_TICKS(15000));
 
     xSemaphoreGive(keep_alive_semaphore);
+
+    while(1)
+        vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-void do_retransmit(const int sock)
+void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
 {
     int len;
-    char rx_buffer[128],  msg_ack[128], login[128], keep_alive[128], command[128] = "\0";
+    char rx_buffer[128], login[128], keep_alive[128], command[128] = "\0";
     const char *msg_nack = "NACK", *msg_ack = "ACK"; 
-
-    uint8_t keep_ailve_f = 0;
 
     TaskHandle_t keep_alive_handle = NULL;
     SemaphoreHandle_t keep_alive_semaphore = xSemaphoreCreateBinary();
@@ -32,7 +35,7 @@ void do_retransmit(const int sock)
         //keep alive timeout
         if(xSemaphoreTake(keep_alive_semaphore, 10) == pdTRUE)
         {
-            ESP_LOGE(TAG, "Timeout reached, closing socket...");
+            ESP_LOGE(TAG_T, "Timeout reached, closing socket...");
             break;
         }
 
@@ -52,7 +55,7 @@ void do_retransmit(const int sock)
         //receive data
         rx_buffer[0] = '\0';
         len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-        else if(len > 1)
+        if(len > 1)
         {
             rx_buffer[len] = 0; 
             ESP_LOGI(TAG_T, "Received %d bytes: %s", len, rx_buffer);
@@ -62,24 +65,24 @@ void do_retransmit(const int sock)
             {
                 int written = send(sock, msg_ack, strlen(msg_ack), 0);
                 if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred on sending ACK - Login: errno %d", errno);
+                    ESP_LOGE(TAG_T, "Error occurred on sending ACK - Login: errno %d", errno);
                     break;
                 }
                 else 
-                    ESP_LOGI(TAG, "Login Acknowledge");
+                    ESP_LOGI(TAG_T, "Login Acknowledge");
             }
             //KEEP ALIVE
             else if(strncmp(rx_buffer, keep_alive, strlen(keep_alive)) == 0 )
             {
                 int written = send(sock, msg_ack, strlen(msg_ack), 0);
                 if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred on sending ACK - Keep Alive: errno %d", errno);
+                    ESP_LOGE(TAG_T, "Error occurred on sending ACK - Keep Alive: errno %d", errno);
                     break;
                 }
                 else 
                 {
                     //keep_alive_handle
-                    ESP_LOGI(TAG, "Keep alive Acknowledge" );
+                    ESP_LOGI(TAG_T, "Keep alive Acknowledge" );
 
                     if(keep_alive_handle != NULL)
                     {
@@ -97,11 +100,11 @@ void do_retransmit(const int sock)
             {
                 int written = send(sock, msg_nack, strlen(msg_nack), 0);
                 if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred on sending NACK: errno %d", errno);
+                    ESP_LOGE(TAG_T, "Error occurred on sending NACK: errno %d", errno);
                     break;
                 }
                 else 
-                    ESP_LOGW(TAG, "Unknown mesage, NACK send");
+                    ESP_LOGW(TAG_T, "Unknown mesage, NACK send");
             }
         }
 
