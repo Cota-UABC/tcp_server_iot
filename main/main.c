@@ -15,8 +15,10 @@
 
 static const char *TAG = "MAIN_TCP";
 
-#define SSID "cota_mobil"
-#define PASS "123456780"
+#define SSID "Totalplay-2.4G-b518"
+#define PASS "Qxm2EAzh99Ce7Lfk"
+//#define SSID "cota_mobil"
+//#define PASS "123456780"
 
 #define QUEUE_LENGTH 20      
 #define STRING_SIZE 128  
@@ -32,7 +34,7 @@ void app_main(void)
     if(wifi_connect(SSID, PASS) == ESP_FAIL)
     {
         ESP_LOGE(TAG_W, "Could not connect to wifi, restarting...");
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(10000));
         esp_restart();
     }
 
