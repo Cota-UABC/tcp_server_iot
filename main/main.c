@@ -44,24 +44,11 @@ void app_main(void)
 
     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void *)queue_command_handler, 5, NULL);
 
-    //vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
     xTaskCreate(udp_server_task, "udp_server_task", 4096, (void *)queue_command_handler, 5, NULL);
 
     while(1)
     {
-        /*
-        //send comand from udp queue
-        if(xQueueReceive(queue_command_handler, command, pdMS_TO_TICKS(10)))
-        {
-            ESP_LOGI(TAG, "Command received %s", command);
-            //char *test = "UABC:BCR:R:L:test"; //patch for test, command string is null
-            int written = send(sock, command, strlen(command), 0);
-            if (written < 0)
-                ESP_LOGE(TAG, "Error occurred during sending Command: errno %d", errno);
-            else
-                ESP_LOGI(TAG, "Send correctly: %s", command);
-        }
-        */
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
