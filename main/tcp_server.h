@@ -30,10 +30,15 @@
 #define ELEMENT_BIT_LEN 3
 #define VALUE_BIT_LEN 3
 
-
 #define USER_MAIN "a1264598"
 
-void do_retransmit(const int sock, QueueHandle_t queue_command_handler);
+typedef struct 
+{
+    QueueHandle_t queue_command_handler;
+    QueueHandle_t queue_anwserback_handler;
+} task_tcp_params_t;
+
+void do_retransmit(const int sock, task_tcp_params_t *params);
 
 void tcp_server_task(void *pvParameters);
 

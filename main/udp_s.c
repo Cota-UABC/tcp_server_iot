@@ -1,14 +1,15 @@
 #include "udp_s.h"
 #include "wifi.h"
 
-static const char *TAG_U = "UDP_SOCKET";
+//TEMP
+volatile uint16_t value = 0;
+QueueHandle_t queue_anwserback_handler = NULL;
 
-//int com_f = 0;
-//char command[STR_LEN] = "\0";
+static const char *TAG_U = "UDP_SOCKET";
 
 void udp_server_task(void *pvParameters)
 {
-    QueueHandle_t queue_command_handler = (QueueHandle_t)pvParameters;
+    task_udp_params_t *params = (task_udp_params_t *) pvParameters;
 
     char rx_buffer[STRING_LENGHT], tx_buffer[STRING_LENGHT];
     char addr_str[STRING_LENGHT];
@@ -49,6 +50,9 @@ void udp_server_task(void *pvParameters)
 
     while (1)
     {
+        rx_buffer[0] = '\0';
+        tx_buffer[0] = '\0';
+
         //ESP_LOGI(TAG_U, "Waiting for data");
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
 
@@ -59,11 +63,13 @@ void udp_server_task(void *pvParameters)
             ESP_LOGI(TAG_U, "Received %d bytes from %s:", len, addr_str);
             ESP_LOGI(TAG_U, "%s", rx_buffer);
 
-            if( !xQueueSend(queue_command_handler, rx_buffer, portMAX_DELAY) )
+            if( !xQueueSend(params->queue_command_handler, rx_buffer, portMAX_DELAY) )
                 ESP_LOGE(TAG_U, "Error sending queue: %s", rx_buffer);
             
             //retrace back 
-            sprintf(tx_buffer, "ACK"); 
+            //sprintf(tx_buffer, "ACK"); 
+
+            xQueueReceive(params->queue_anwserback_handler, tx_buffer, portMAX_DELAY);
             sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
         }
         //else did not receive data

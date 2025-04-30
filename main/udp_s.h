@@ -18,16 +18,16 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define PORT 4080
+#define PORT 8250
 
 //string
 #define STRING_LENGHT 128
 
-
-#define STR_LEN 128
-
-//extern int com_f;
-//extern char command[STR_LEN];
+typedef struct 
+{
+    QueueHandle_t queue_command_handler;
+    QueueHandle_t queue_anwserback_handler;
+} task_udp_params_t;
 
 void udp_server_task(void *pvParameters);
 

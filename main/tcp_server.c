@@ -4,11 +4,12 @@ static const char *TAG_T = "TCP";
 
 int sock;
 
+
 void keep_alive_timer_task(void *pvParameters)
 {
     SemaphoreHandle_t keep_alive_semaphore = (SemaphoreHandle_t)pvParameters;
 
-    ESP_LOGI(TAG_T, "Timer started");
+    ESP_LOGI(TAG_T, "Timeout started");
     vTaskDelay(pdMS_TO_TICKS(15000));
 
     xSemaphoreGive(keep_alive_semaphore);
@@ -17,7 +18,7 @@ void keep_alive_timer_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
+void do_retransmit(const int sock, task_tcp_params_t *params)
 {
     int len;
     char rx_buffer[128], login[128], keep_alive[128], command[128] = "\0";
@@ -31,7 +32,12 @@ void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
     sprintf(login, "UABC:%s:L", USER_MAIN);
     sprintf(keep_alive, "UABC:%s:K", USER_MAIN);
 
+    //CONEXION TIMEOUT
+    xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+
     while(1){
+        rx_buffer[0] = '\0';
+
         //keep alive timeout
         if(xSemaphoreTake(keep_alive_semaphore, 10) == pdTRUE)
         {
@@ -40,20 +46,31 @@ void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
         }
 
         //check if command received
-        if(xQueueReceive(queue_command_handler, command, pdMS_TO_TICKS(10)))
+        if(xQueueReceive(params->queue_command_handler, command, pdMS_TO_TICKS(10)))
         {
+            ESP_LOGW(TAG_T, "Received command");
             int written = send(sock, command, strlen(command), 0);
             if (written < 0) {
-                ESP_LOGE(TAG_T, "Error occurred on sending command - Login: errno %d", errno);
+                ESP_LOGE(TAG_T, "Error occurred on sending command: errno %d", errno);
             }
             else 
+            {
                 ESP_LOGI(TAG_T, "Command send: %s", command);
+                len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+                if(len > 1)
+                {
+                    rx_buffer[len] = 0; 
+                    ESP_LOGI(TAG_T, "Received %d bytes: %s", len, rx_buffer);
+                    
+                    xQueueSend(params->queue_anwserback_handler, rx_buffer, portMAX_DELAY);
+                    ESP_LOGI(TAG_T, "Responce send to udp: %s", rx_buffer);
+                }
+            }
             
             command[0] = '\0';
         }
 
         //receive data
-        rx_buffer[0] = '\0';
         len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
         if(len > 1)
         {
@@ -69,7 +86,15 @@ void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
                     break;
                 }
                 else 
+                {
                     ESP_LOGI(TAG_T, "Login Acknowledge");
+                    if(keep_alive_handle != NULL)
+                    {
+                        vTaskDelete(keep_alive_handle);
+                        keep_alive_handle = NULL;
+                    }
+                    xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+                }
             }
             //KEEP ALIVE
             else if(strncmp(rx_buffer, keep_alive, strlen(keep_alive)) == 0 )
@@ -117,7 +142,7 @@ void do_retransmit(const int sock, QueueHandle_t queue_command_handler)
 
 void tcp_server_task(void *pvParameters)
 {
-    QueueHandle_t queue_command_handler = (QueueHandle_t)pvParameters;
+    task_tcp_params_t *params = (task_tcp_params_t *) pvParameters;
 
     char addr_str[128];
     int addr_family = AF_INET;
@@ -191,7 +216,7 @@ void tcp_server_task(void *pvParameters)
 
         ESP_LOGI(TAG_T, "Socket accepted ip address: %s", addr_str);
 
-        do_retransmit(sock, queue_command_handler);
+        do_retransmit(sock, params);
 
         shutdown(sock, 0);
         close(sock);
