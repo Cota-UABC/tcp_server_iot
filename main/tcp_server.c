@@ -32,10 +32,11 @@ void do_retransmit(const int sock, task_tcp_params_t *params)
     sprintf(login, "UABC:%s:L", USER_MAIN);
     sprintf(keep_alive, "UABC:%s:K", USER_MAIN);
 
-    //CONEXION TIMEOUT
+    //CONNECTION TIMEOUT
     xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
 
-    while(1){
+    while(1)
+    {
         rx_buffer[0] = '\0';
 
         //keep alive timeout
@@ -55,7 +56,8 @@ void do_retransmit(const int sock, task_tcp_params_t *params)
             }
             else 
             {
-                ESP_LOGI(TAG_T, "Command send: %s", command);
+                ESP_LOGI(TAG_T, "Command send to client: %s", command);
+                ESP_LOGI(TAG_T, "Written %d", written);
                 len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
                 if(len > 1)
                 {
@@ -153,40 +155,41 @@ void tcp_server_task(void *pvParameters)
     int keepCount = KEEPALIVE_COUNT;
     struct sockaddr_storage dest_addr;
 
-    if (addr_family == AF_INET) {
-        struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
-        dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
-        dest_addr_ip4->sin_family = AF_INET;
-        dest_addr_ip4->sin_port = htons(PORT_TCP);
-        ip_protocol = IPPROTO_IP;
-    }
+    int listen_sock;
+    while(1)
+    {
+        if (addr_family == AF_INET) {
+            struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
+            dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
+            dest_addr_ip4->sin_family = AF_INET;
+            dest_addr_ip4->sin_port = htons(PORT_TCP);
+            ip_protocol = IPPROTO_IP;
+        }
 
-    int listen_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
-    if (listen_sock < 0) {
-        ESP_LOGE(TAG_T, "Unable to create socket: errno %d", errno);
-        vTaskDelete(NULL);
-        return;
-    }
-    int opt = 1;
-    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        listen_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
+        if (listen_sock < 0) {
+            ESP_LOGE(TAG_T, "Unable to create socket: errno %d", errno);
+            vTaskDelete(NULL);
+            return;
+        }
+        int opt = 1;
+        setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    ESP_LOGI(TAG_T, "Socket created");
+        ESP_LOGI(TAG_T, "Socket created");
 
-    int err = bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-    if (err != 0) {
-        ESP_LOGE(TAG_T, "Socket unable to bind: errno %d", errno);
-        ESP_LOGE(TAG_T, "IPPROTO: %d", addr_family);
-        goto CLEAN_UP;
-    }
-    ESP_LOGI(TAG_T, "Socket bound, port %d", PORT_TCP);
+        int err = bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        if (err != 0) {
+            ESP_LOGE(TAG_T, "Socket unable to bind: errno %d", errno);
+            ESP_LOGE(TAG_T, "IPPROTO: %d", addr_family);
+            goto CLEAN_UP;
+        }
+        ESP_LOGI(TAG_T, "Socket bound, port %d", PORT_TCP);
 
-    err = listen(listen_sock, 1);
-    if (err != 0) {
-        ESP_LOGE(TAG_T, "Error occurred during listen: errno %d", errno);
-        goto CLEAN_UP;
-    }
-
-    while (1) {
+        err = listen(listen_sock, 1);
+        if (err != 0) {
+            ESP_LOGE(TAG_T, "Error occurred during listen: errno %d", errno);
+            goto CLEAN_UP;
+        }
 
         ESP_LOGI(TAG_T, "Socket listening");
 
@@ -220,9 +223,11 @@ void tcp_server_task(void *pvParameters)
 
         shutdown(sock, 0);
         close(sock);
+    
+
+        CLEAN_UP:
+        close(listen_sock);
     }
 
-CLEAN_UP:
-    close(listen_sock);
     vTaskDelete(NULL);
 }

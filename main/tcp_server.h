@@ -30,7 +30,11 @@
 #define ELEMENT_BIT_LEN 3
 #define VALUE_BIT_LEN 3
 
+#define MAX_RETRY_RECV 4
+
 #define USER_MAIN "a1264598"
+
+#define STR_LEN 128
 
 typedef struct 
 {
@@ -39,6 +43,8 @@ typedef struct
 } task_tcp_params_t;
 
 void do_retransmit(const int sock, task_tcp_params_t *params);
+
+void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr);
 
 void tcp_server_task(void *pvParameters);
 
