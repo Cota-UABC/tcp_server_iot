@@ -10,7 +10,7 @@ void keep_alive_timer_task(void *pvParameters)
     SemaphoreHandle_t keep_alive_semaphore = (SemaphoreHandle_t)pvParameters;
 
     ESP_LOGI(TAG_T, "Timeout started");
-    vTaskDelay(pdMS_TO_TICKS(15000));
+    vTaskDelay(pdMS_TO_TICKS(KEEP_ALIVE_MS_WAIT));
 
     xSemaphoreGive(keep_alive_semaphore);
 
@@ -20,20 +20,24 @@ void keep_alive_timer_task(void *pvParameters)
 
 void do_retransmit(const int sock, task_tcp_params_t *params)
 {
-    int len;
-    char rx_buffer[128], login[128], keep_alive[128], command[128] = "\0";
+    int len, err;
+    uint8_t login_f = 0, partial_rx_f = 0;
+    uint16_t retry_cnt;
+    char rx_buffer[STR_LEN], login[STR_LEN], keep_alive[STR_LEN], command[STR_LEN] = "\0", local_buffer[STR_LEN*2];
     const char *msg_nack = "NACK", *msg_ack = "ACK"; 
 
     TaskHandle_t keep_alive_handle = NULL;
     SemaphoreHandle_t keep_alive_semaphore = xSemaphoreCreateBinary();
 
-    
+
     //crear comandos
     sprintf(login, "UABC:%s:L", USER_MAIN);
     sprintf(keep_alive, "UABC:%s:K", USER_MAIN);
 
     //CONNECTION TIMEOUT
     xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+
+    ESP_LOGW(TAG_T, "Waiting for login...");
 
     while(1)
     {
@@ -47,99 +51,193 @@ void do_retransmit(const int sock, task_tcp_params_t *params)
         }
 
         //check if command received
-        if(xQueueReceive(params->queue_command_handler, command, pdMS_TO_TICKS(10)))
+        if(login_f && xQueueReceive(params->queue_command_handler, command, pdMS_TO_TICKS(10)))
         {
             ESP_LOGW(TAG_T, "Received command");
-            int written = send(sock, command, strlen(command), 0);
-            if (written < 0) {
-                ESP_LOGE(TAG_T, "Error occurred on sending command: errno %d", errno);
-            }
-            else 
-            {
-                ESP_LOGI(TAG_T, "Command send to client: %s", command);
-                ESP_LOGI(TAG_T, "Written %d", written);
-                len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-                if(len > 1)
-                {
-                    rx_buffer[len] = 0; 
-                    ESP_LOGI(TAG_T, "Received %d bytes: %s", len, rx_buffer);
-                    
-                    xQueueSend(params->queue_anwserback_handler, rx_buffer, portMAX_DELAY);
-                    ESP_LOGI(TAG_T, "Responce send to udp: %s", rx_buffer);
-                }
-            }
+            transmit_receive(command, rx_buffer, &sock);
+            
+            //if different than ack
+            if(strncmp(rx_buffer, "ACK", 3) != 0)
+                strcpy(rx_buffer, "NACK");
+
+            xQueueSend(params->queue_anwserback_handler, rx_buffer, portMAX_DELAY);
+            ESP_LOGI(TAG_T, "Responce send to udp: %s", rx_buffer);
             
             command[0] = '\0';
         }
 
         //receive data
-        len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-        if(len > 1)
-        {
-            rx_buffer[len] = 0; 
-            ESP_LOGI(TAG_T, "Received %d bytes: %s", len, rx_buffer);
+        rx_buffer[0] = '\0';
+        local_buffer[0] = '\0';
 
-            //LOGIN
-            if(strncmp(rx_buffer, login, strlen(login)) == 0)
+        retry_cnt = 0;
+        partial_rx_f = 0;
+        do{
+            len = recv(sock, local_buffer, sizeof(local_buffer) - 1, 0);
+            if(len > 1)
             {
-                int written = send(sock, msg_ack, strlen(msg_ack), 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG_T, "Error occurred on sending ACK - Login: errno %d", errno);
-                    break;
-                }
-                else 
-                {
-                    ESP_LOGI(TAG_T, "Login Acknowledge");
-                    if(keep_alive_handle != NULL)
-                    {
-                        vTaskDelete(keep_alive_handle);
-                        keep_alive_handle = NULL;
-                    }
-                    xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
-                }
-            }
-            //KEEP ALIVE
-            else if(strncmp(rx_buffer, keep_alive, strlen(keep_alive)) == 0 )
-            {
-                int written = send(sock, msg_ack, strlen(msg_ack), 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG_T, "Error occurred on sending ACK - Keep Alive: errno %d", errno);
-                    break;
-                }
-                else 
-                {
-                    //keep_alive_handle
-                    ESP_LOGI(TAG_T, "Keep alive Acknowledge" );
+                local_buffer[len] = 0; 
+                strcat(rx_buffer, local_buffer);
 
-                    if(keep_alive_handle != NULL)
+                len = strlen(rx_buffer);
+
+                //check terminator delimiter
+                if(rx_buffer[len-1] != TERMINATION_DELIMITER_CHR)
+                {
+                    ESP_LOGW(TAG_T, "Received partial message: %s", local_buffer);
+                    partial_rx_f = 1;
+                    continue;
+                }
+                partial_rx_f = 0;
+
+                //remove termination delimiter
+                rx_buffer[len-1] = '\0';
+                ESP_LOGI(TAG_T, "RX: %s", rx_buffer);
+
+
+                //login not received
+                if(!login_f)
+                {
+                    //if login correct
+                    if(strncmp(rx_buffer, login, strlen(login)) == 0 )
                     {
-                        vTaskDelete(keep_alive_handle);
-                        keep_alive_handle = NULL;
+                        sprintf(local_buffer, "%s", msg_ack);
+
+                        ESP_LOGI(TAG_T, "Login Acknowledge");
+                        if(keep_alive_handle != NULL)
+                        {
+                            vTaskDelete(keep_alive_handle);
+                            keep_alive_handle = NULL;
+                        }
+                        xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+                        
+                        login_f = 1;
                     }
-                    xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+                    else
+                    {
+                        ESP_LOGE(TAG_T, "Login not received...");
+                        goto close_socket;
+                    }
+                }
+                //login received
+                else
+                {
+                    //KEEP ALIVE
+                    if(strncmp(rx_buffer, keep_alive, strlen(keep_alive)) == 0 )
+                    {
+                        sprintf(local_buffer, "%s", msg_ack);
+                        
+                        ESP_LOGI(TAG_T, "Keep alive Acknowledge.");
+
+                        if(keep_alive_handle != NULL)
+                        {
+                            vTaskDelete(keep_alive_handle);
+                            keep_alive_handle = NULL;
+                        }
+                        xTaskCreate(keep_alive_timer_task, "keep_alive_timer_task", 4096, keep_alive_semaphore, 5, &keep_alive_handle);
+                        
+                    }
+                    //ACK OR NACK
+                    else if((strncmp(rx_buffer, "ACK", 3) == 0 || strncmp(rx_buffer, "NACK", 4) == 0))
+                    {   
+                        local_buffer[0] = '\0';
+                        ESP_LOGW(TAG_T, "ACK or NACK ignored");
+                    }
+                    //ANYTHING ELSE
+                    else
+                    {
+                        sprintf(local_buffer, "%s", msg_nack);
+                        ESP_LOGW(TAG_T, "RX Unknown, NACK send");
+                    }
+                }
+
+                //send response
+                if(local_buffer[0] != '\0')
+                {
+                    ESP_LOGI(TAG_T, "TX: %s", local_buffer);
+                    strcat(local_buffer, TERMINATION_DELIMITER_STR);
+                    send(sock, local_buffer, strlen(local_buffer), 0);
                 }
             }
-            //ACK OR NACK
-            else if((strncmp(rx_buffer, "ACK", 3) == 0 || strncmp(rx_buffer, "NACK", 4) == 0))
-                    ESP_LOGW(TAG_T, "ACK or NACK ignored");
-            //ANYTHING ELSE
-            else
+            else if(len == 0)
             {
-                int written = send(sock, msg_nack, strlen(msg_nack), 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG_T, "Error occurred on sending NACK: errno %d", errno);
-                    break;
-                }
-                else 
-                    ESP_LOGW(TAG_T, "Unknown mesage, NACK send");
+                ESP_LOGE(TAG_T, "Connection closed by peer.");
+                goto close_socket;
             }
-        }
+            else if(partial_rx_f)
+            {
+                err = errno;
+
+                if(err == EAGAIN || err == EWOULDBLOCK)
+                {
+                    ESP_LOGW(TAG_T, "recv() timeout, attempt... (%d/%d)", retry_cnt + 1, MAX_RETRY_RECV);
+                    retry_cnt++;
+                }
+            }
+        } while(partial_rx_f && retry_cnt < MAX_RETRY_RECV);
 
     }
 
+    close_socket:
     if(keep_alive_handle != NULL)
         vTaskDelete(keep_alive_handle);
     vSemaphoreDelete(keep_alive_semaphore);
+}
+
+void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
+{
+    int len, err;
+    uint8_t retry_cnt = 0;
+    char local_rx_buffer[STR_LEN/2];
+
+    ESP_LOGI(TAG_T, "TX: %s", tx_buffer);
+    strcat(tx_buffer, TERMINATION_DELIMITER_STR);
+    send(*sock_ptr, tx_buffer, strlen(tx_buffer), 0);
+
+    len = strlen(tx_buffer);
+    tx_buffer[len-1] = '\0';
+
+
+    rx_buffer[0] = '\0';
+
+    while(retry_cnt < MAX_RETRY_RECV)
+    {
+        len = recv(*sock_ptr, local_rx_buffer, sizeof(local_rx_buffer) - 1, 0);
+        
+        if(len > 0) 
+        {
+            local_rx_buffer[len] = '\0';
+            strcat(rx_buffer, local_rx_buffer);
+            
+            len = strlen(rx_buffer);
+
+            //check termination delimiter
+            if(rx_buffer[len-1] != TERMINATION_DELIMITER_CHR)
+            {
+                ESP_LOGW(TAG_T, "Received partial message: %s", local_rx_buffer);
+                continue;
+            }
+
+            rx_buffer[len-1] = '\0';
+            ESP_LOGI(TAG_T, "RX: %s", rx_buffer);
+            break;
+        }
+        else
+        {
+            err = errno;
+
+            if(err == EAGAIN || err == EWOULDBLOCK)
+                ESP_LOGW(TAG_T, "recv() timeout, attempt... (%d/%d)", retry_cnt + 1, MAX_RETRY_RECV);
+            else
+            {
+                ESP_LOGE(TAG_T, "recv() error: %d (%s)", err, strerror(err));
+                break;
+            }
+        }
+        retry_cnt++;
+    }
+
+    return;
 }
 
 void tcp_server_task(void *pvParameters)
@@ -208,8 +306,8 @@ void tcp_server_task(void *pvParameters)
         setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
 
         struct timeval timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 500000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
         // Convert ip address to string
@@ -220,6 +318,8 @@ void tcp_server_task(void *pvParameters)
         ESP_LOGI(TAG_T, "Socket accepted ip address: %s", addr_str);
 
         do_retransmit(sock, params);
+
+        ESP_LOGE(TAG_T, "Closing socket...");
 
         shutdown(sock, 0);
         close(sock);
