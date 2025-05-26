@@ -1,7 +1,6 @@
 #ifndef UDP_S
 #define UDP_S
 
-
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
@@ -15,19 +14,14 @@
 #include "lwip/sockets.h"
 #include "lwip/ip_addr.h"
 
+#include "tcp_server.h"
+
 #include <string.h>
 #include <inttypes.h>
 
 #define PORT 8250
 
-//string
-#define STRING_LENGHT 128
-
-typedef struct 
-{
-    QueueHandle_t queue_command_handler;
-    QueueHandle_t queue_anwserback_handler;
-} task_udp_params_t;
+#define QUEUE_MS_WAIT 5000
 
 void udp_server_task(void *pvParameters);
 

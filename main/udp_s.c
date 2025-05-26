@@ -1,18 +1,12 @@
 #include "udp_s.h"
-#include "wifi.h"
-
-//TEMP
-volatile uint16_t value = 0;
-QueueHandle_t queue_anwserback_handler = NULL;
 
 static const char *TAG_U = "UDP_SOCKET";
 
 void udp_server_task(void *pvParameters)
 {
-    task_udp_params_t *params = (task_udp_params_t *) pvParameters;
 
-    char rx_buffer[STRING_LENGHT], tx_buffer[STRING_LENGHT];
-    char addr_str[STRING_LENGHT];
+    char rx_buffer[128], tx_buffer[128];
+    char addr_str[128];
     int addr_family = AF_INET, ip_protocol = 0;
     struct sockaddr_in6 dest_addr;
 
@@ -53,26 +47,42 @@ void udp_server_task(void *pvParameters)
         rx_buffer[0] = '\0';
         tx_buffer[0] = '\0';
 
-        //ESP_LOGI(TAG_U, "Waiting for data");
+        //wating for data
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
 
         if(len > 0)
         {
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-            rx_buffer[len] = '\0'; // terminator
             ESP_LOGI(TAG_U, "Received %d bytes from %s:", len, addr_str);
+
+            rx_buffer[len] = '\0'; // terminator
             ESP_LOGI(TAG_U, "%s", rx_buffer);
 
-            if( !xQueueSend(params->queue_command_handler, rx_buffer, portMAX_DELAY) )
-                ESP_LOGE(TAG_U, "Error sending queue: %s", rx_buffer);
-            
-            //retrace back 
-            //sprintf(tx_buffer, "ACK"); 
+            //send to active sockets tasks
+            for(int i=0; i<MAX_SOCKETS; i++)
+            {
+                if(xSemaphoreTake(active_sock_mutex, portMAX_DELAY)) {
+                    if(active_sock_f_array[i])
+                    {
+                        //send queue to socket task
+                        if(!xQueueSend(received_cmmd_queue_array[i], rx_buffer, pdMS_TO_TICKS(QUEUE_MS_WAIT)))
+                            ESP_LOGE(TAG_U, "Could not send queue, previous message not received");
 
-            xQueueReceive(params->queue_anwserback_handler, tx_buffer, portMAX_DELAY);
-            sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+                        //receive queue from socket task
+                        if(xQueueReceive(response_cmmd_queue_array[i], tx_buffer, pdMS_TO_TICKS(QUEUE_MS_WAIT)))
+                            sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+                        else 
+                        {   
+                            ESP_LOGE(TAG_U, "No response from socket task");
+                            sprintf(tx_buffer, "No response from client");
+                            sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+                        }
+                    }
+                    else
+                        ESP_LOGW(TAG_U, "Socket %d not active", i);
+                xSemaphoreGive(active_sock_mutex); }
+            }
         }
-        //else did not receive data
     }
 
     ESP_LOGE(TAG_U, "Shutting down socket...");

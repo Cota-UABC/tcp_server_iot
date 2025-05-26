@@ -30,6 +30,7 @@ menu "Example Configuration"
             Keep-alive probe packet interval time.
 
     config EXAMPLE_KEEPALIVE_COUNT
+        CONFIG_EXAMPLE_KEEPALIVE_COUNT
         int "TCP keep-alive packet retry send counts"
         default 3
         help

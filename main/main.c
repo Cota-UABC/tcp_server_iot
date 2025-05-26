@@ -15,30 +15,16 @@
 
 static const char *TAG = "MAIN";
 
-//#define SSID "Totalplay-2.4G-b518"
-//#define PASS "Qxm2EAzh99Ce7Lfk"
-#define SSID "COTA_PC"
-#define PASS "0402{V8z"
+#define SSID "Totalplay-2.4G-b518"
+#define PASS "Qxm2EAzh99Ce7Lfk"
+//#define SSID "COTA_PC"
+//#define PASS "0402{V8z"
 //#define SSID "IoT_AP"
 //#define PASS "12345678"
-
-#define QUEUE_LENGTH 20      
-#define STRING_SIZE 128  
-
-typedef struct 
-{
-    QueueHandle_t queue_command_handler;
-    QueueHandle_t queue_anwserback_handler;
-} task_server_params_t;
 
 
 void app_main(void)
 {
-    task_server_params_t server_params;
-
-    server_params.queue_command_handler = xQueueCreate(QUEUE_LENGTH, STRING_SIZE);
-    server_params.queue_anwserback_handler = xQueueCreate(QUEUE_LENGTH, STRING_SIZE);
-
     if(wifi_connect(SSID, PASS) == ESP_FAIL)
     {
         ESP_LOGE(TAG, "Could not connect to wifi, restarting...");
@@ -46,14 +32,15 @@ void app_main(void)
         esp_restart();
     }
 
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, (void *)&server_params, 5, NULL);
+    xTaskCreate(tcp_server_main_task, "tcp_server_main_task", 4096, NULL, 5, NULL);
 
+    //delay to see logs more clearly
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    xTaskCreate(udp_server_task, "udp_server_task", 4096, (void *)&server_params, 5, NULL);
+    xTaskCreate(udp_server_task, "udp_server_task", 4096, NULL, 5, NULL);
 
     while(1)
     {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
