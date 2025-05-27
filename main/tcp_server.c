@@ -92,7 +92,7 @@ void tcp_server_main_task(void *pvParameters)
         timeout.tv_usec = 500000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-        // Convert ip address to string
+        //Convert ip address to string
         if (source_addr.ss_family == PF_INET) {
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
         }

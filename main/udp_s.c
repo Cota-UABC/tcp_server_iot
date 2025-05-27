@@ -56,7 +56,7 @@ void udp_server_task(void *pvParameters)
             ESP_LOGI(TAG_U, "Received %d bytes from %s:", len, addr_str);
 
             rx_buffer[len] = '\0'; // terminator
-            ESP_LOGI(TAG_U, "%s", rx_buffer);
+            ESP_LOGI(TAG_U, "RX: %s", rx_buffer);
 
             //send to active sockets tasks
             for(int i=0; i<MAX_SOCKETS; i++)
@@ -69,14 +69,14 @@ void udp_server_task(void *pvParameters)
                             ESP_LOGE(TAG_U, "Could not send queue, previous message not received");
 
                         //receive queue from socket task
-                        if(xQueueReceive(response_cmmd_queue_array[i], tx_buffer, pdMS_TO_TICKS(QUEUE_MS_WAIT)))
-                            sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
-                        else 
+                        if(!xQueueReceive(response_cmmd_queue_array[i], tx_buffer, pdMS_TO_TICKS(QUEUE_MS_WAIT)))
                         {   
                             ESP_LOGE(TAG_U, "No response from socket task");
                             sprintf(tx_buffer, "No response from client");
-                            sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
                         }
+                        //send back responce
+                        sendto(sock, tx_buffer, strlen(tx_buffer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+                        ESP_LOGI(TAG_U, "TX: %s", tx_buffer);
                     }
                     else
                         ESP_LOGW(TAG_U, "Socket %d not active", i);
