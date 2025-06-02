@@ -162,7 +162,8 @@ void manage_socket_task(void *pvParameters)
     int len, err;
     uint8_t login_f = 0, partial_rx_f = 0;
     uint16_t retry_cnt;
-    char rx_buffer[STR_LEN], login[STR_LEN], keep_alive[STR_LEN], command[STR_LEN] = "\0", local_buffer[STR_LEN*2];
+    char rx_buffer[STR_LEN], login[STR_LEN], keep_alive[STR_LEN], command[STR_LEN] = "\0", 
+        local_buffer[STR_LEN*2];
     const char *msg_nack = "NACK", *msg_ack = "ACK"; 
 
     TaskHandle_t keep_alive_handle = NULL;
@@ -218,6 +219,10 @@ void manage_socket_task(void *pvParameters)
             if(len > 1)
             {
                 local_buffer[len] = 0; 
+
+                //decode
+                decode_string(local_buffer);
+
                 strcat(rx_buffer, local_buffer);
 
                 len = strlen(rx_buffer);
@@ -297,6 +302,9 @@ void manage_socket_task(void *pvParameters)
                 {
                     ESP_LOGI(sock_task_tag, "TX: %s", local_buffer);
                     strcat(local_buffer, TERMINATION_DELIMITER_STR);
+
+                    //code
+                    code_string(local_buffer);
                     send(params->sock, local_buffer, strlen(local_buffer), 0);
                 }
             }
@@ -360,6 +368,9 @@ void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
 
     ESP_LOGI(TAG_T, "TX: %s", tx_buffer);
     strcat(tx_buffer, TERMINATION_DELIMITER_STR);
+
+    //code
+    code_string(tx_buffer);
     send(*sock_ptr, tx_buffer, strlen(tx_buffer), 0);
 
     len = strlen(tx_buffer);
@@ -375,6 +386,10 @@ void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
         if(len > 0) 
         {
             local_rx_buffer[len] = '\0';
+
+            //decode
+            decode_string(local_rx_buffer);
+
             strcat(rx_buffer, local_rx_buffer);
             
             len = strlen(rx_buffer);
@@ -382,7 +397,7 @@ void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
             //check termination delimiter
             if(rx_buffer[len-1] != TERMINATION_DELIMITER_CHR)
             {
-                ESP_LOGW(TAG_T, "Received partial message: %s", local_rx_buffer);
+                ESP_LOGW(TAG_T, "Received partial message: %s", rx_buffer);
                 continue;
             }
 
@@ -408,3 +423,41 @@ void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
     return;
 }
 
+void decode_string(char *str)
+{
+    char buffer_decoded[STR_LEN] = {0};
+
+    for(int i=0; i<strlen(str); i=i+2)
+    {
+        int len = strlen(buffer_decoded);  
+
+        buffer_decoded[len] = (((uint8_t)str[i] << 1) & 0xAA) | (((uint8_t)str[i+1] >> 1) & 0x55); 
+
+        buffer_decoded[len + 1] = '\0';
+    }
+
+    //printf("Original: %s\n", str);
+    //printf("Decoded: %s\n", buffer_decoded);
+
+    strcpy(str, buffer_decoded);
+}
+
+void code_string(char *str)
+{
+    char buffer_coded[STR_LEN] = {0};
+
+    for(int i=0; i<strlen(str); i++)
+    {
+        int len = strlen(buffer_coded);  
+    
+        buffer_coded[len] = (((uint8_t)str[i] & 0xAA) >> 1) | ((~((uint8_t)str[i] & 0xAA)) & 0xAA);
+        buffer_coded[len + 1] = (((uint8_t)str[i] & 0x55) << 1) | ((~((uint8_t)str[i] & 0x55)) & 0x55);
+
+        buffer_coded[len + 2] = '\0';
+    }
+    
+    //printf("Original: %s\n", str);
+    //printf("Coded: %s\n", buffer_coded);
+
+    strcpy(str, buffer_coded);
+}

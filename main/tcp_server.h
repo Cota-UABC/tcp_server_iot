@@ -74,4 +74,8 @@ void keep_alive_timer_task(void *pvParameters);
 
 void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr);
 
+void decode_string(char *str);
+
+void code_string(char *str);
+
 #endif
