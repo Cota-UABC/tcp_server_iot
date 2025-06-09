@@ -25,15 +25,13 @@
 #define IP_LENGHT 50
 
 extern const char *TAG_W;
-extern uint8_t connected_w, ip_flag;
+extern uint8_t connected_state;
 
 extern esp_netif_ip_info_t ip_info;
 
 
-extern char ip_addr[IP_LENGHT];
-
 void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 
-esp_err_t wifi_connect(char *ssid, char *password);
+esp_err_t wifi_connect(char *ssid, char *password, char *ip);
 
 #endif 

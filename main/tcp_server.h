@@ -48,6 +48,14 @@
 #define AVAILABLE 0
 #define UNAVAILABLE 1
 
+//exit flags
+#define UNDEFINED 0
+#define COMMUNICATION_OK 1
+#define COMMUNICATION_FAIL 2
+#define CONNECTION_CLOSED 3
+#define CONNECTION_TIMEOUT 4
+#define STOP_SEMAPHORE 5
+
 #define STR_LEN 128
 
 extern char received_command[STR_LEN];
@@ -72,7 +80,9 @@ void manage_socket_task(void *pvParameters);
 
 void keep_alive_timer_task(void *pvParameters);
 
-void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr);
+uint8_t receive_data(const char *LOCAL_FUNCTION_TAG, int sock, char *rx_buffer, size_t buffer_size);
+
+void transmit_data(const char *LOCAL_FUNCTION_TAG, int sock, char *tx_buffer);
 
 void decode_string(char *str);
 

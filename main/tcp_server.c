@@ -159,11 +159,8 @@ void manage_socket_task(void *pvParameters)
     char sock_task_tag[STR_LEN];
     sprintf(sock_task_tag, "TCP SOCK(%d)", params->sock);
 
-    int len, err;
-    uint8_t login_f = 0, partial_rx_f = 0;
-    uint16_t retry_cnt;
-    char rx_buffer[STR_LEN], login[STR_LEN], keep_alive[STR_LEN], command[STR_LEN] = "\0", 
-        local_buffer[STR_LEN*2];
+    uint8_t login_f = 0, return_f;
+    char rx_buffer[STR_LEN], tx_buffer[STR_LEN], login[STR_LEN], keep_alive[STR_LEN], command[STR_LEN] = "\0";
     const char *msg_nack = "NACK", *msg_ack = "ACK"; 
 
     TaskHandle_t keep_alive_handle = NULL;
@@ -181,8 +178,6 @@ void manage_socket_task(void *pvParameters)
 
     while(1)
     {
-        rx_buffer[0] = '\0';
-
         //keep alive timeout check
         if(xSemaphoreTake(keep_alive_semaphore, 10) == pdTRUE)
         {
@@ -190,64 +185,19 @@ void manage_socket_task(void *pvParameters)
             break;
         }
 
-        //command received check
-        if(login_f && xQueueReceive(params->received_cmmd_queue, command, pdMS_TO_TICKS(10)))
+        //rx data
+        return_f = receive_data(sock_task_tag, params->sock, rx_buffer, sizeof(rx_buffer));
+
+        //check return value
+        if(return_f == COMMUNICATION_OK)
         {
-            ESP_LOGW(sock_task_tag, "Received command");
-            transmit_receive(command, rx_buffer, &params->sock);
-            
-            //if different than ack
-            if(strncmp(rx_buffer, msg_ack, 3) != 0)
-                strcpy(rx_buffer, msg_nack);
-
-            xQueueSend(params->response_cmmd_queue, rx_buffer, portMAX_DELAY);
-            ESP_LOGI(sock_task_tag, "Responce send to udp: %s", rx_buffer);
-            
-            command[0] = '\0';
-        }
-
-        //receive data
-        rx_buffer[0] = '\0';
-        local_buffer[0] = '\0';
-
-        retry_cnt = 0;
-        partial_rx_f = 0;
-
-        //wait until received full message with termination delimiter
-        do{
-            len = recv(params->sock, local_buffer, sizeof(local_buffer) - 1, 0);
-            if(len > 1)
-            {
-                local_buffer[len] = 0; 
-
-                //decode
-                decode_string(local_buffer);
-
-                strcat(rx_buffer, local_buffer);
-
-                len = strlen(rx_buffer);
-
-                //check terminator delimiter
-                if(rx_buffer[len-1] != TERMINATION_DELIMITER_CHR)
-                {
-                    ESP_LOGW(sock_task_tag, "Received partial message: %s", local_buffer);
-                    partial_rx_f = 1;
-                    continue;
-                }
-                partial_rx_f = 0;
-
-                //remove termination delimiter
-                rx_buffer[len-1] = '\0';
-                ESP_LOGI(sock_task_tag, "RX: %s", rx_buffer);
-
-
-                //login not received
+             //login not received
                 if(!login_f)
                 {
                     //if login correct
                     if(strncmp(rx_buffer, login, strlen(login)) == 0 )
                     {
-                        sprintf(local_buffer, "%s", msg_ack);
+                        sprintf(tx_buffer, "%s", msg_ack);
 
                         ESP_LOGI(sock_task_tag, "Login Acknowledge");
                         if(keep_alive_handle != NULL)
@@ -271,7 +221,7 @@ void manage_socket_task(void *pvParameters)
                     //KEEP ALIVE
                     if(strncmp(rx_buffer, keep_alive, strlen(keep_alive)) == 0 )
                     {
-                        sprintf(local_buffer, "%s", msg_ack);
+                        sprintf(tx_buffer, "%s", msg_ack);
                         
                         ESP_LOGI(sock_task_tag, "Keep alive Acknowledge.");
 
@@ -286,44 +236,41 @@ void manage_socket_task(void *pvParameters)
                     //ACK OR NACK
                     else if((strncmp(rx_buffer, "ACK", 3) == 0 || strncmp(rx_buffer, "NACK", 4) == 0))
                     {   
-                        local_buffer[0] = '\0';
+                        tx_buffer[0] = '\0';
                         ESP_LOGW(sock_task_tag, "ACK or NACK ignored");
                     }
                     //ANYTHING ELSE
                     else
                     {
-                        sprintf(local_buffer, "%s", msg_nack);
+                        sprintf(tx_buffer, "%s", msg_nack);
                         ESP_LOGW(sock_task_tag, "RX Unknown, NACK send");
                     }
                 }
 
                 //send response
-                if(local_buffer[0] != '\0')
-                {
-                    ESP_LOGI(sock_task_tag, "TX: %s", local_buffer);
-                    strcat(local_buffer, TERMINATION_DELIMITER_STR);
+                if(tx_buffer[0] != '\0')
+                    transmit_data(sock_task_tag, params->sock, tx_buffer);
+        }
+        else if(return_f == CONNECTION_CLOSED)
+           goto close_socket;
+        
 
-                    //code
-                    code_string(local_buffer);
-                    send(params->sock, local_buffer, strlen(local_buffer), 0);
-                }
-            }
-            else if(len == 0)
-            {
-                ESP_LOGE(sock_task_tag, "Connection closed by peer.");
-                goto close_socket;
-            }
-            else if(partial_rx_f)
-            {
-                err = errno;
+        //command received check
+        if(login_f && xQueueReceive(params->received_cmmd_queue, command, pdMS_TO_TICKS(10)))
+        {
+            ESP_LOGW(sock_task_tag, "Received command");
+            transmit_data(sock_task_tag, params->sock, command);
+            receive_data(sock_task_tag, params->sock, rx_buffer, strlen(rx_buffer));
+            
+            //if different than ack
+            if(strncmp(rx_buffer, msg_ack, 3) != 0)
+                strcpy(rx_buffer, msg_nack);
 
-                if(err == EAGAIN || err == EWOULDBLOCK)
-                {
-                    ESP_LOGW(sock_task_tag, "recv() timeout, attempt... (%d/%d)", retry_cnt + 1, MAX_RETRY_RECV);
-                    retry_cnt++;
-                }
-            }
-        } while(partial_rx_f && retry_cnt < MAX_RETRY_RECV);
+            xQueueSend(params->response_cmmd_queue, rx_buffer, portMAX_DELAY);
+            ESP_LOGI(sock_task_tag, "Responce send to udp: %s", rx_buffer);
+            
+            command[0] = '\0';
+        }
 
     }
 
@@ -360,67 +307,92 @@ void keep_alive_timer_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(100));
 }
 
-void transmit_receive(char *tx_buffer, char *rx_buffer, int *sock_ptr)
+uint8_t receive_data(const char *LOCAL_FUNCTION_TAG, int sock, char *rx_buffer, size_t buffer_size)
 {
-    int len, err;
-    uint8_t retry_cnt = 0;
-    char local_rx_buffer[STR_LEN/2];
-
-    ESP_LOGI(TAG_T, "TX: %s", tx_buffer);
-    strcat(tx_buffer, TERMINATION_DELIMITER_STR);
-
-    //code
-    code_string(tx_buffer);
-    send(*sock_ptr, tx_buffer, strlen(tx_buffer), 0);
-
-    len = strlen(tx_buffer);
-    tx_buffer[len-1] = '\0';
-
-
+    char local_buffer[STR_LEN] = {0};
+    int len, err = 0;
+    uint8_t retry_cnt = 0, partial_rx_f = 0,return_f = UNDEFINED;
+    
     rx_buffer[0] = '\0';
 
-    while(retry_cnt < MAX_RETRY_RECV)
-    {
-        len = recv(*sock_ptr, local_rx_buffer, sizeof(local_rx_buffer) - 1, 0);
-        
+    //do while it has not received termination delimiter and retries are not max
+    do{
+        len = recv(sock, local_buffer, buffer_size - 1, 0);
         if(len > 0) 
         {
-            local_rx_buffer[len] = '\0';
+            local_buffer[len] = '\0';
 
-            //decode
-            decode_string(local_rx_buffer);
+            //decode_string(local_buffer);
 
-            strcat(rx_buffer, local_rx_buffer);
-            
+            strcat(rx_buffer, local_buffer);
+
             len = strlen(rx_buffer);
-
-            //check termination delimiter
+                        
+            //check terminator delimiter
             if(rx_buffer[len-1] != TERMINATION_DELIMITER_CHR)
             {
-                ESP_LOGW(TAG_T, "Received partial message: %s", rx_buffer);
+                ESP_LOGW(LOCAL_FUNCTION_TAG, "Received partial message: %s", local_buffer);
+                partial_rx_f = 1;
                 continue;
             }
-
+            partial_rx_f = 0;
+            
+            /*
+            ESP_LOGI(LOCAL_FUNCTION_TAG, "RX LEN: %d", strlen(rx_buffer));
+            for (int i = 0; i<strlen(rx_buffer); i++) {
+                printf("%02X ", (unsigned char)rx_buffer[i]);
+            }
+            printf("\n");
+            */
+        
+            //remove termination delimiter
             rx_buffer[len-1] = '\0';
-            ESP_LOGI(TAG_T, "RX: %s", rx_buffer);
+            ESP_LOGI(LOCAL_FUNCTION_TAG, "RX: %s", rx_buffer);
+
+
+            return_f = COMMUNICATION_OK;
             break;
         }
-        else
+        else if(len == 0)
+        {
+            ESP_LOGE(LOCAL_FUNCTION_TAG, "Connection closed by peer.");
+            return_f = CONNECTION_CLOSED;
+            break;
+        }
+        else if(partial_rx_f)
         {
             err = errno;
 
             if(err == EAGAIN || err == EWOULDBLOCK)
-                ESP_LOGW(TAG_T, "recv() timeout, attempt... (%d/%d)", retry_cnt + 1, MAX_RETRY_RECV);
-            else
             {
-                ESP_LOGE(TAG_T, "recv() error: %d (%s)", err, strerror(err));
-                break;
+                ESP_LOGW(LOCAL_FUNCTION_TAG, "recv() timeout, attempt... (%d/%d)", retry_cnt + 1, MAX_RETRY_RECV);
+                retry_cnt++;
             }
         }
-        retry_cnt++;
-    }
+    } while(partial_rx_f && retry_cnt <= MAX_RETRY_RECV);
 
-    return;
+    if(retry_cnt >= MAX_RETRY_RECV)
+    return_f = CONNECTION_TIMEOUT;
+
+    return return_f;
+}
+
+void transmit_data(const char *LOCAL_FUNCTION_TAG, int sock, char *tx_buffer)
+{
+    ESP_LOGI(LOCAL_FUNCTION_TAG, "TX: %s", tx_buffer);
+    strcat(tx_buffer, TERMINATION_DELIMITER_STR);
+
+    //encode_string(tx_buffer);
+
+    /*
+    ESP_LOGI(LOCAL_FUNCTION_TAG, "TX LEN: %d", strlen(tx_buffer));
+    for (int i = 0; i<strlen(tx_buffer); i++) {
+        printf("%02X ", (unsigned char)tx_buffer[i]);
+    }
+    printf("\n");
+    */
+
+    send(sock, tx_buffer, strlen(tx_buffer), 0);
 }
 
 void decode_string(char *str)
@@ -444,6 +416,7 @@ void decode_string(char *str)
 
 void code_string(char *str)
 {
+
     char buffer_coded[STR_LEN] = {0};
 
     for(int i=0; i<strlen(str); i++)

@@ -1,14 +1,13 @@
 #include "wifi.h"
 
 const char *TAG_W = "WIFI";
-uint8_t connected_w = WATING_CONNEXION, ip_flag;
+uint8_t connected_state = WATING_CONNEXION;
 
 static int retry_count = 0;
 
 esp_netif_ip_info_t ip_info;
 
-char ip_addr[IP_LENGHT] = "\0";
-
+char ip_addr[IP_LENGHT] = {0};
 
 void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -20,7 +19,7 @@ void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, in
         break;
     case WIFI_EVENT_STA_CONNECTED:
         ESP_LOGI(TAG_W,"WiFi connected WIFI_EVENT_STA_CONNECTED ...");
-        connected_w = CONNECTED;
+        connected_state = CONNECTED;
         retry_count = 0;
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
@@ -35,7 +34,7 @@ void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, in
             esp_wifi_stop();
             esp_wifi_deinit();
             ESP_LOGE(TAG_W,"WiFi stopped.");
-            connected_w = FAILED;
+            connected_state = FAILED;
         }
         break;
     case IP_EVENT_STA_GOT_IP:
@@ -45,14 +44,12 @@ void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, in
         esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
         esp_netif_get_ip_info(netif, &ip_info);
         snprintf(ip_addr, IP_LENGHT, "%d.%d.%d.%d", IP2STR(&ip_info.ip));
-        ip_flag = 1;
         break;
     }
 }
 
-esp_err_t wifi_connect(char *ssid, char *password)
+esp_err_t wifi_connect(char *ssid, char *password, char *ip)
 {
-    ip_flag = 0;
     esp_err_t error = nvs_flash_init();
     if(error == ESP_ERR_NVS_NO_FREE_PAGES || error == ESP_ERR_NVS_NEW_VERSION_FOUND) 
     {
@@ -84,16 +81,18 @@ esp_err_t wifi_connect(char *ssid, char *password)
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
 
-    ESP_LOGE(TAG_W, "Wating for connexion....");
-    while(ip_flag == 0)
+    ESP_LOGW(TAG_W, "Wating for connexion...");
+    while(ip_addr[0] == '\0')
     {
-        if(connected_w == FAILED)
+        if(connected_state == FAILED)
         {
             ESP_LOGE(TAG_W, "Wifi conexion failed...");
             return ESP_FAIL;
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
+
+    strcpy(ip, ip_addr);
     
     return ESP_OK;
 }
